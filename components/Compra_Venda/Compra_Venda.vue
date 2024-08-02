@@ -1,5 +1,4 @@
 <template>
-  <!-- App Bar e Drawer -->
   <v-app-bar fixed color="#041022" dark>
     <v-app-bar-nav-icon @click="toggleDrawer"></v-app-bar-nav-icon>
     <v-app-bar-title class="mr-6">Compra e Venda de Ativos</v-app-bar-title>
@@ -153,73 +152,66 @@ export default {
     };
   },
   async mounted() {
-    // Gerar e atualizar ativos iniciais ao montar o componente
-    await this.gerarEAtualizarAtivos();
-    // Iniciar intervalo para atualizar ativos a cada 10 segundos
-    setInterval(this.atualizarAtivos, 10000);
+    await this.fetchAtivos();
+    await this.fetchTransacoes();  // Fetch transacoes initially
+    this.startAtivosUpdateInterval();
   },
   methods: {
-    async gerarEAtualizarAtivos() {
-      const tickers = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'NFLX', 'META', 'V', 'JPM'];
-      const apiKey = 'SUA_CHAVE_DE_API_ALPHA_VANTAGE'; // Substitua pela sua chave de API
-
-      for (let i = 0; i < tickers.length; i++) {
-        const randomTicker = tickers[i];
-        try {
-          const response = await axios.get(`https://www.alphavantage.co/query`, {
-            params: {
-              function: 'TIME_SERIES_INTRADAY',
-              symbol: randomTicker,
-              interval: '1min',
-              apikey: apiKey
-            }
-          });
-
-          const data = response.data['Time Series (1min)'];
-          const lastRefreshed = Object.keys(data)[0];
-          const lastPrice = data[lastRefreshed]['4. close'];
-
-          const novoAtivo = {
-            ticker: randomTicker,
-            nome: randomTicker, // Nome fictício, pois Alpha Vantage pode não fornecer
-            tipo: 'Tecnologia', // Pode ajustar conforme necessário
-            precoAtual: lastPrice,
-            setor: 'Tecnologia', // Ajuste conforme necessário
-            industria: 'Software' // Ajuste conforme necessário
-          };
-
-          this.ativos.push(novoAtivo);
-        } catch (error) {
-          console.error('Erro ao gerar ativo aleatório:', error);
-          // Tratar erros de forma adequada
-        }
+    toggleDrawer() {
+      this.drawer = !this.drawer;
+    },
+    async fetchAtivos() {
+      const token = localStorage.getItem('token');
+      try {
+        const response = await axios.get('http://localhost:8000/api/v1/cadastrar-ativos', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        this.ativos = response.data.map(item => ({
+          ...item,
+          precoAtual: parseFloat(item.precoAtual) || 0  // Garantir que o valor é um número
+        }));
+      } catch (error) {
+        console.error('Erro ao buscar ativos:', error);
       }
     },
-    async atualizarAtivos() {
-      const apiKey = 'SUA_CHAVE_DE_API_ALPHA_VANTAGE'; // Substitua pela sua chave de API
-
-      for (let i = 0; i < this.ativos.length; i++) {
-        const ativo = this.ativos[i];
-        try {
-          const response = await axios.get(`https://www.alphavantage.co/query`, {
-            params: {
-              function: 'TIME_SERIES_INTRADAY',
-              symbol: ativo.ticker,
-              interval: '1min',
-              apikey: apiKey
+    async fetchTransacoes() {
+      const token = localStorage.getItem('token');
+      try {
+        const [comprasResponse, vendasResponse] = await Promise.all([
+          axios.get('http://localhost:8000/api/v1/compras', {
+            headers: {
+              'Authorization': `Bearer ${token}`
             }
-          });
+          }),
+          axios.get('http://localhost:8000/api/v1/vendas', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          })
+        ]);
 
-          const data = response.data['Time Series (1min)'];
-          const lastRefreshed = Object.keys(data)[0];
-          const lastPrice = data[lastRefreshed]['4. close'];
+        const formatTransacoes = (items, tipo) => items.map(item => ({
+          ...item,
+          tipo,
+          valorTotal: parseFloat(item.valor_total) || 0,  // Garantir que o valor é um número
+          precoUnitario: parseFloat(item.valor_unitario) || 0,  // Garantir que o valor é um número
+          data: new Date(item.data).toLocaleDateString('pt-BR') // Formatar data
+        }));
 
-          ativo.precoAtual = lastPrice;
-        } catch (error) {
-          console.error('Erro ao atualizar dados do ativo:', error);
-          // Tratar erros de forma adequada
-        }
+        const compras = formatTransacoes(comprasResponse.data, 'Compra');
+        const vendas = formatTransacoes(vendasResponse.data, 'Venda');
+
+        this.transacoes = [...compras, ...vendas];
+      } catch (error) {
+        console.error('Erro ao buscar transações:', error);
       }
+    },
+    startAtivosUpdateInterval() {
+      setInterval(() => {
+        this.fetchAtivos();
+      }, 10000);
     },
     selectAtivo(ativo) {
       this.ativoSelecionado = ativo;
@@ -228,47 +220,55 @@ export default {
       this.formMode = mode;
       this.dialog = true;
     },
-    submitAporte() {
-      // Simular ação de realizar aporte
-      const tipoTransacao = this.formMode === 'compra' ? 'Compra' : 'Venda';
-      const valorTotal = this.form.quantidade * this.form.precoUnitario;
-      const dataAtual = new Date().toISOString().split('T')[0];
+    async submitAporte() {
+      const token = localStorage.getItem('token');
+      try {
+        const url = this.formMode === 'compra'
+          ? 'http://localhost:8000/api/v1/compras'
+          : 'http://localhost:8000/api/v1/vendas';
 
-      this.transacoes.unshift({
-        tipo: tipoTransacao,
-        ticker: this.ativoSelecionado.ticker,
-        quantidade: this.form.quantidade,
-        precoUnitario: this.form.precoUnitario,
-        valorTotal: valorTotal,
-        data: dataAtual
-      });
+          await axios.post(url, {
+          id_ticker: this.ativoSelecionado.id, // Ajustado para 'id_ticker'
+          quantidade: parseInt(this.form.quantidade, 10), // Garantir que seja um número inteiro
+          valor_unitario: parseFloat(this.form.precoUnitario), // Garantir que seja um número decimal
+          valor_total: parseFloat(this.form.quantidade) * parseFloat(this.form.precoUnitario) // Calcular valor total
+        }, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'  // Adicione este header se o backend esperar JSON
+          }
+        });
 
-      // Lógica adicional para enviar os dados para API ou processar localmente
-      this.dialog = false;
-      this.form.quantidade = null;
-      this.form.precoUnitario = null;
+        this.dialog = false;
+        this.fetchTransacoes(); // Atualizar transações após o envio
+      } catch (error) {
+        console.error('Erro ao enviar o formulário:', error);
+      }
+    },
+    formatValue(value, type) {
+      if (type === 'currency') {
+        return new Intl.NumberFormat('pt-BR', {
+          style: 'currency',
+          currency: 'BRL'
+        }).format(value);
+      }
+      if (type === 'date') {
+        return new Date(value).toLocaleDateString('pt-BR');
+      }
+      return value;
     },
     print() {
       window.print();
-    },
-    toggleDrawer() {
-      this.drawer = !this.drawer;
-    },
-    formatValue(value, type) {
-      switch (type) {
-        case 'currency':
-          return `R$ ${parseFloat(value).toFixed(2)}`;
-        case 'date':
-          return new Date(value).toLocaleDateString();
-        default:
-          return value;
-      }
     }
   }
 };
 </script>
 
 <style scoped>
+.info-label {
+  font-weight: bold;
+  color: #333;
+}
 .cursor-pointer {
   cursor: pointer;
 }
