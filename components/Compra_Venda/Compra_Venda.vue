@@ -1,4 +1,5 @@
 <template>
+  <!-- Restante do template permanece igual -->
   <v-app-bar fixed color="#041022" dark>
     <v-app-bar-nav-icon @click="toggleDrawer"></v-app-bar-nav-icon>
     <v-app-bar-title class="mr-6">Compra e Venda de Ativos</v-app-bar-title>
@@ -27,12 +28,7 @@
           <v-card class="mb-4">
             <v-card-title class="primary white--text">Ativos Disponíveis</v-card-title>
             <v-card-text>
-              <v-data-table
-                :headers="headers"
-                :items="ativos"
-                item-key="ticker"
-                class="elevation-1"
-              >
+              <v-data-table :headers="headers" :items="ativos" item-key="ticker" class="elevation-1">
                 <template v-slot:item="{ item }">
                   <tr @click="selectAtivo(item)" class="cursor-pointer">
                     <td class="text-start">{{ item.ticker }}</td>
@@ -74,36 +70,33 @@
           </v-card>
         </v-col>
       </v-row>
-
       <!-- Formulário de Compra/Venda -->
       <v-dialog v-model="dialog" max-width="600">
         <v-card>
           <v-card-title>{{ formMode === 'compra' ? 'Compra de Ativo' : 'Venda de Ativo' }}</v-card-title>
           <v-card-text>
             <v-form @submit.prevent="submitAporte">
-              <v-text-field v-model="form.quantidade" label="Quantidade" type="number" required></v-text-field>
-              <v-text-field v-model="form.precoUnitario" label="Preço Unitário" type="number" required></v-text-field>
+              <v-text-field v-model="form.quantidade" label="Quantidade" type="number" required
+                :error-messages="formErrors.quantidade"></v-text-field>
+              <v-text-field v-model="form.precoUnitario" label="Preço Unitário" type="number" required
+                :error-messages="formErrors.precoUnitario"></v-text-field>
               <v-btn type="submit" color="primary">Confirmar</v-btn>
             </v-form>
           </v-card-text>
         </v-card>
       </v-dialog>
-
       <!-- Compras e Vendas Realizadas -->
       <v-card class="mb-4">
         <v-card-title class="accent white--text">Minhas Compras e Vendas</v-card-title>
         <v-card-text>
-          <v-data-table
-            :headers="transacaoHeaders"
-            :items="transacoes"
-            class="elevation-1"
-          >
+          <v-data-table :headers="transacaoHeaders" :items="transacoes" class="elevation-1">
             <template v-slot:item="{ item }">
               <tr>
                 <td>{{ item.tipo }}</td>
                 <td>{{ item.ticker }}</td>
                 <td>{{ item.quantidade }}</td>
                 <td>{{ formatValue(item.precoUnitario, 'currency') }}</td>
+                <td>{{ formatValue(item.precoAtual, 'currency') }}</td>
                 <td>{{ formatValue(item.valorTotal, 'currency') }}</td>
                 <td>{{ formatValue(item.data, 'date') }}</td>
               </tr>
@@ -114,6 +107,8 @@
     </v-container>
   </v-main>
 </template>
+<!-- Resto do conteúdo permanece igual -->
+
 
 <script>
 import axios from 'axios';
@@ -138,6 +133,7 @@ export default {
         { text: 'Ticker', value: 'ticker' },
         { text: 'Quantidade', value: 'quantidade' },
         { text: 'Preço Unitário', value: 'precoUnitario' },
+        { text: 'Preço Atual', value: 'precoAtual' },
         { text: 'Valor Total', value: 'valorTotal' },
         { text: 'Data', value: 'data' }
       ],
@@ -148,12 +144,16 @@ export default {
         quantidade: null,
         precoUnitario: null
       },
+      formErrors: {
+        quantidade: '',
+        precoUnitario: ''
+      },
       transacoes: []
     };
   },
   async mounted() {
     await this.fetchAtivos();
-    await this.fetchTransacoes();  // Fetch transacoes initially
+    await this.fetchTransacoes();
     this.startAtivosUpdateInterval();
   },
   methods: {
@@ -162,16 +162,23 @@ export default {
     },
     async fetchAtivos() {
       const token = localStorage.getItem('token');
+      console.log('Buscando ativos...');
       try {
         const response = await axios.get('http://localhost:8000/api/v1/cadastrar-ativos', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
+
         this.ativos = response.data.map(item => ({
           ...item,
-          precoAtual: parseFloat(item.precoAtual) || 0  // Garantir que o valor é um número
+          precoAtual: parseFloat(item.precoAtual) || 0
         }));
+
+        this.ativosMap = this.ativos.reduce((map, item) => {
+          map[item.ticker] = item.id;
+          return map;
+        }, {});
       } catch (error) {
         console.error('Erro ao buscar ativos:', error);
       }
@@ -195,76 +202,140 @@ export default {
         const formatTransacoes = (items, tipo) => items.map(item => ({
           ...item,
           tipo,
-          valorTotal: parseFloat(item.valor_total) || 0,  // Garantir que o valor é um número
-          precoUnitario: parseFloat(item.valor_unitario) || 0,  // Garantir que o valor é um número
-          data: new Date(item.data).toLocaleDateString('pt-BR') // Formatar data
+          valorTotal: parseFloat(item.valor_total) || 0,
+          precoUnitario: parseFloat(item.valor_unitario) || 0,
+          precoAtual: this.ativos.find(ativo => ativo.ticker === item.ticker)?.precoAtual || 0,
+          data: item.created_at ? new Date(item.created_at).toLocaleDateString('pt-BR') : ''
         }));
 
         const compras = formatTransacoes(comprasResponse.data, 'Compra');
         const vendas = formatTransacoes(vendasResponse.data, 'Venda');
 
-        this.transacoes = [...compras, ...vendas];
+        this.transacoes = [...compras, ...vendas].sort((a, b) => new Date(b.data) - new Date(a.data));
       } catch (error) {
         console.error('Erro ao buscar transações:', error);
       }
     },
-    startAtivosUpdateInterval() {
-      setInterval(() => {
-        this.fetchAtivos();
-      }, 10000);
-    },
-    selectAtivo(ativo) {
-      this.ativoSelecionado = ativo;
+    async selectAtivo(item) {
+      this.ativoSelecionado = item;
+      this.dialog = true;
     },
     openForm(mode) {
       this.formMode = mode;
       this.dialog = true;
+      this.formErrors = {}; // Resetar erros
     },
     async submitAporte() {
       const token = localStorage.getItem('token');
-      try {
-        const url = this.formMode === 'compra'
-          ? 'http://localhost:8000/api/v1/compras'
-          : 'http://localhost:8000/api/v1/vendas';
+      const endpoint = this.formMode === 'compra'
+        ? 'http://localhost:8000/api/v1/compras'
+        : 'http://localhost:8000/api/v1/vendas';
 
-          await axios.post(url, {
-          id_ticker: this.ativoSelecionado.id, // Ajustado para 'id_ticker'
-          quantidade: parseInt(this.form.quantidade, 10), // Garantir que seja um número inteiro
-          valor_unitario: parseFloat(this.form.precoUnitario), // Garantir que seja um número decimal
-          valor_total: parseFloat(this.form.quantidade) * parseFloat(this.form.precoUnitario) // Calcular valor total
-        }, {
+      const idTicker = this.ativosMap[this.ativoSelecionado.ticker];
+
+      if (!idTicker) {
+        console.error('ID do ticker é inválido:', this.ativoSelecionado.ticker);
+        alert('ID do ticker é inválido.');
+        return;
+      }
+
+      const payload = {
+        id_ticker: idTicker,
+        quantidade: parseFloat(this.form.quantidade),
+        valor_unitario: parseFloat(this.form.precoUnitario),
+        valor_total: parseFloat(this.form.precoUnitario) * parseFloat(this.form.quantidade)
+      };
+
+      console.log(`Enviando ${this.formMode} com dados:`, payload);
+
+      try {
+        const response = await axios.post(endpoint, payload, {
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'  // Adicione este header se o backend esperar JSON
+            'Authorization': `Bearer ${token}`
           }
         });
 
+        console.log(`${this.formMode.charAt(0).toUpperCase() + this.formMode.slice(1)} realizado com sucesso.`);
         this.dialog = false;
-        this.fetchTransacoes(); // Atualizar transações após o envio
+        this.form.quantidade = null;
+        this.form.precoUnitario = null;
+        await this.fetchAtivos();
+        await this.fetchTransacoes();
       } catch (error) {
-        console.error('Erro ao enviar o formulário:', error);
+        console.error(`Erro ao realizar ${this.formMode}:`, error.response ? error.response.data : error.message);
+        alert(`Erro ao realizar ${this.formMode}.`);
+        if (error.response && error.response.data) {
+          this.formErrors = error.response.data.errors || {};
+        }
       }
     },
     formatValue(value, type) {
       if (type === 'currency') {
-        return new Intl.NumberFormat('pt-BR', {
-          style: 'currency',
-          currency: 'BRL'
-        }).format(value);
-      }
-      if (type === 'date') {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+      } else if (type === 'date') {
         return new Date(value).toLocaleDateString('pt-BR');
       }
       return value;
+    },
+    startAtivosUpdateInterval() {
+      setInterval(async () => {
+        await this.fetchAtivos();
+      }, 60000);
     },
     print() {
       window.print();
     }
   }
-};
+}
 </script>
 
 <style scoped>
+.v-data-table {
+  font-size: 14px;
+}
+
+.info-label {
+  font-weight: bold;
+}
+
+.primary {
+  background-color: #1976D2 !important;
+}
+
+.accent {
+  background-color: #FF5722 !important;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+</style>
+
+
+<!-- <style scoped>
+.v-data-table {
+  font-size: 14px;
+}
+
+.info-label {
+  font-weight: bold;
+}
+
+.primary {
+  background-color: #1976D2 !important;
+}
+
+.accent {
+  background-color: #FF5722 !important;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+</style> -->
+
+
+<!-- <style scoped>
 .info-label {
   font-weight: bold;
   color: #333;
@@ -281,4 +352,4 @@ export default {
 .white--text {
   color: #ffffff;
 }
-</style>
+</style> -->

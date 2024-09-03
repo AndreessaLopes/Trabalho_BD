@@ -1,81 +1,24 @@
 <template>
   <div>
     <v-app-bar fixed color="#041022" dark>
-      <!-- Ícone para abrir/fechar o drawer -->
       <v-app-bar-nav-icon @click="drawer = !drawer"></v-app-bar-nav-icon>
-      
-      <!-- Título da aplicação -->
       <v-app-bar-title class="mr-6">Brix Investimentos</v-app-bar-title>
-      
-      <!-- Botão para carregar arquivos PDF -->
       <v-btn @click="openFilePicker" accept="application/pdf" hide-details class="mr-4">
         Carregar
       </v-btn>
-      
-      <!-- Dropdown "Início" -->
-      <v-menu open-on-hover>
+      <v-menu open-on-hover v-for="(options, label) in dropdownOptions" :key="label">
         <template v-slot:activator="{ props }">
-          <v-btn color="primary" v-bind="props" class="mr-4">Início: {{ inicio }}</v-btn>
+          <v-btn color="primary" v-bind="props" class="mr-4">
+            {{ label }}: {{ selected[label.toLowerCase()] }}
+          </v-btn>
         </template>
         <v-list>
-          <v-list-item v-for="option in inicioOptions" :key="option" @click="selectInicio(option)">
+          <v-list-item v-for="option in options" :key="option" @click="selectDropdown(label.toLowerCase(), option)">
             <v-list-item-title>{{ option }}</v-list-item-title>
           </v-list-item>
         </v-list>
       </v-menu>
-      
-      <!-- Dropdown "Período" -->
-      <v-menu open-on-hover>
-        <template v-slot:activator="{ props }">
-          <v-btn color="primary" v-bind="props" class="mr-4">Período: {{ periodo }}</v-btn>
-        </template>
-        <v-list>
-          <v-list-item v-for="option in periodOptions" :key="option" @click="selectPeriodo(option)">
-            <v-list-item-title>{{ option }}</v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
-      
-      <!-- Dropdown "Conta" -->
-      <v-menu open-on-hover>
-        <template v-slot:activator="{ props }">
-          <v-btn color="primary" v-bind="props" class="mr-4">Conta: {{ conta }}</v-btn>
-        </template>
-        <v-list>
-          <v-list-item v-for="option in accountOptions" :key="option" @click="selectConta(option)">
-            <v-list-item-title>{{ option }}</v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
-      
-      <!-- Dropdown "Estratégia de Alocação" -->
-      <v-menu open-on-hover>
-        <template v-slot:activator="{ props }">
-          <v-btn color="primary" v-bind="props" class="mr-4">Estratégia de Alocação: {{ estrategia }}</v-btn>
-        </template>
-        <v-list>
-          <v-list-item v-for="option in strategyOptions" :key="option" @click="selectEstrategia(option)">
-            <v-list-item-title>{{ option }}</v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
-      
-      <!-- Dropdown "Grupo de Estratégia" -->
-      <v-menu open-on-hover>
-        <template v-slot:activator="{ props }">
-          <v-btn color="primary" v-bind="props">Grupo de Estratégia: {{ grupo }}</v-btn>
-        </template>
-        <v-list>
-          <v-list-item v-for="option in groupOptions" :key="option" @click="selectGrupo(option)">
-            <v-list-item-title>{{ option }}</v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
-      
-      <!-- Ícone de Impressora -->
       <v-icon @click="print" class="ml-6">mdi-printer</v-icon>
-      
-      <!-- Input file hidden para carregar arquivos -->
       <input
         ref="fileInput"
         type="file"
@@ -86,7 +29,6 @@
     </v-app-bar>
 
     <v-navigation-drawer v-model="drawer" temporary clipped app>
-      <!-- Conteúdo do drawer aqui -->
       <v-list dense>
         <v-list-item v-for="item in items" :key="item.text" :to="{ path: item.link }">
           <v-list-item-icon>
@@ -101,6 +43,11 @@
 
     <v-main>
       <v-container>
+        <!-- Mensagem de Erro -->
+        <v-alert v-if="error" type="error" dismissible>
+          {{ error }}
+        </v-alert>
+
         <!-- Cards de informações -->
         <v-row>
           <v-col cols="12" md="6" lg="4" v-for="card in infoCards" :key="card.title">
@@ -117,12 +64,12 @@
         <v-row>
           <v-col cols="12" md="6">
             <v-card class="pa-4">
-              <line-chart :chart-data="rentabilidadeData" />
+              <canvas ref="lineChartCanvas"></canvas>
             </v-card>
           </v-col>
           <v-col cols="12" md="6">
             <v-card class="pa-4">
-              <bar-chart :chart-data="rentabilidadeMensalData" />
+              <canvas ref="barChartCanvas"></canvas>
             </v-card>
           </v-col>
         </v-row>
@@ -131,35 +78,80 @@
   </div>
 </template>
 
-
 <script>
-import { Line, Bar } from 'vue-chartjs'
-import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement } from 'chart.js'
-ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement)
+import { defineComponent, ref, onMounted } from 'vue';
+import Chart from 'chart.js/auto';
+import axios from 'axios';
 
-export default {
+export default defineComponent({
+  name: 'Grafico',
   data() {
     return {
       drawer: false,
-      inicio: "Hoje",
-      inicioOptions: ["Hoje", "Ontem", "Semana Passada", "Mês Passado"],
-      periodo: "6 meses",
-      periodOptions: ["1 mês", "3 meses", "6 meses", "1 ano"],
-      conta: "Todas as contas",
-      accountOptions: ["Todas as contas", "Conta específica 1", "Conta específica 2", "Conta específica 3"],
-      estrategia: "Tipo de Ativo",
-      strategyOptions: ["Ações", "Renda Fixa", "Fundos Imobiliários"],
-      grupo: "Ações",
-      groupOptions: ["Ticker ABC", "Ticker XYZ", "Ticker QRS"],
+      dropdownOptions: {
+        Início: ["Hoje", "Ontem", "Semana Passada", "Mês Passado"],
+        Período: ["1 mês", "3 meses", "6 meses", "1 ano"],
+        Conta: ["Todas as contas", "Conta específica 1", "Conta específica 2", "Conta específica 3"],
+        'Estratégia de Alocação': ["Ações", "Renda Fixa", "Fundos Imobiliários"],
+        'Grupo de Estratégia': ["Ticker ABC", "Ticker XYZ", "Ticker QRS"],
+      },
+      selected: {
+        inicio: "Hoje",
+        periodo: "6 meses",
+        conta: "Todas as contas",
+        estrategia: "Ações",
+        grupo: "Ticker ABC",
+      },
       items: [
         { text: 'Cadastrar Ativos', icon: 'mdi-wallet-bifold', link: '/cadastro' },
         { text: 'Histórico de Preços Ativos', icon: 'mdi-chart-bar', link: '/historico' },
         { text: 'Compra e Venda', icon: 'mdi-currency-usd', link: '/compra_venda' },
         { text: 'Relatório', icon: 'mdi-finance', link: '/relatorio' },
       ],
-      infoCards: [],
-      rentabilidadeData: {},
-      rentabilidadeMensalData: {},
+      infoCards: [
+        { title: 'Posição Inicial', value: '' },
+        { title: 'Posição Final', value: '' },
+        { title: 'Movimentação', value: '' },
+        { title: 'Rentabilidade', value: '' },
+        { title: 'Volatilidade', value: '' },
+        { title: 'Resultado Projetado', value: '' }
+      ],
+      rentabilidadeData: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Rentabilidade',
+            backgroundColor: '#42A5F5',
+            data: []
+          }
+        ]
+      },
+      rentabilidadeMensalData: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Rentabilidade Mensal',
+            backgroundColor: '#FF6384',
+            data: []
+          }
+        ]
+      },
+      chartOptions: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+          },
+          tooltip: {
+            callbacks: {
+              label: function(tooltipItem) {
+                return tooltipItem.label + ': ' + tooltipItem.raw + '%';
+              }
+            }
+          }
+        }
+      },
+      error: null, // Adicionar uma variável para mensagens de erro
     };
   },
   methods: {
@@ -168,7 +160,7 @@ export default {
     },
     handleFileUpload(event) {
       const file = event.target.files[0];
-      if (file.type === 'application/pdf') {
+      if (file && file.type === 'application/pdf') {
         console.log('Arquivo carregado:', file);
       } else {
         console.error('Por favor, selecione um arquivo PDF válido.');
@@ -177,78 +169,61 @@ export default {
     print() {
       window.print();
     },
-    selectInicio(option) {
-      this.inicio = option;
+    selectDropdown(type, option) {
+      this.selected[type] = option;
+      this.fetchData();
     },
-    selectPeriodo(option) {
-      this.periodo = option;
-    },
-    selectConta(option) {
-      this.conta = option;
-    },
-    selectEstrategia(option) {
-      this.estrategia = option;
-    },
-    selectGrupo(option) {
-      this.grupo = option;
-    },
-    async generateReport() {
-      try {
-        const response = await axios.post('/api/relatorio-diversos', {
-          inicio: this.inicio,
-          periodo: this.periodo,
-          conta: this.conta,
-          estrategia: this.estrategia,
-          grupo: this.grupo
+    fetchData() {
+      axios.get('/api/v1/relatorio-diversos', { params: this.selected })
+        .then(response => {
+          const data = response.data;
+          this.infoCards[0].value = data.posicao_inicial;
+          this.infoCards[1].value = data.posicao_final;
+          this.infoCards[2].value = data.movimentacao;
+          this.infoCards[3].value = data.rentabilidade_periodo;
+          this.infoCards[4].value = data.volatilidade;
+          this.infoCards[5].value = data.resultado_projetado;
+
+          this.rentabilidadeData.labels = data.rentabilidade.labels;
+          this.rentabilidadeData.datasets[0].data = data.rentabilidade.data;
+
+          this.rentabilidadeMensalData.labels = data.rentabilidade_mensal.labels;
+          this.rentabilidadeMensalData.datasets[0].data = data.rentabilidade_mensal.data;
+
+          this.renderCharts();
+        })
+        .catch(error => {
+          this.error = 'Erro ao buscar os dados.';
+          console.error('Erro ao buscar os dados:', error);
         });
-        this.processReport(response.data);
-      } catch (error) {
-        console.error('Erro ao gerar relatório:', error);
-      }
     },
-    processReport(data) {
-      this.infoCards = data.map((item, index) => ({
-        title: `Relatório ${index + 1}`,
-        value: `Posição Inicial: R$ ${item.posicao_inicial.toFixed(2)}, Posição Final: R$ ${item.posicao_final.toFixed(2)}, Movimentação: R$ ${item.movimentacao.toFixed(2)}, Rentabilidade: ${item.rentabilidade_periodo.toFixed(2)}%, Volatilidade: ${item.volatilidade.toFixed(2)}%, Resultado Projetado: R$ ${item.resultado_projetado.toFixed(2)}`
-      }));
-      // Gerar dados para gráficos
-      this.rentabilidadeData = {
-        labels: data.map((_, index) => `Relatório ${index + 1}`),
-        datasets: [
-          {
-            label: 'Rentabilidade',
-            backgroundColor: '#f87979',
-            data: data.map(item => item.rentabilidade_periodo)
-          }
-        ]
-      };
-      this.rentabilidadeMensalData = {
-        labels: data.map((_, index) => `Relatório ${index + 1}`),
-        datasets: [
-          {
-            label: 'Rentabilidade Mensal',
-            backgroundColor: '#f87979',
-            data: data.map(item => item.rentabilidade_periodo / 6) // Exemplo de cálculo mensal
-          }
-        ]
-      };
+    renderCharts() {
+      // Limpa os gráficos existentes, se necessário
+      const ctxLine = this.$refs.lineChartCanvas.getContext('2d');
+      if (this.lineChart) this.lineChart.destroy(); // Remove o gráfico existente, se houver
+      this.lineChart = new Chart(ctxLine, {
+        type: 'line',
+        data: this.rentabilidadeData,
+        options: this.chartOptions
+      });
+
+      const ctxBar = this.$refs.barChartCanvas.getContext('2d');
+      if (this.barChart) this.barChart.destroy(); // Remove o gráfico existente, se houver
+      this.barChart = new Chart(ctxBar, {
+        type: 'bar',
+        data: this.rentabilidadeMensalData,
+        options: this.chartOptions
+      });
     }
+  },
+  mounted() {
+    this.fetchData();
   }
-};
+});
 </script>
 
 <style scoped>
 .v-app-bar {
-  background-color: #041022; /* Cor de fundo */
-}
-.v-btn--text {
-  color: #4A3AFF; /* Cor do texto dos botões */
-}
-.v-file-input input {
-  display: none; /* Esconder o input de arquivo padrão */
-}
-.v-container {
-  margin-top: 16px; /* Espaçamento superior */
+  background-color: #041022;
 }
 </style>
-
