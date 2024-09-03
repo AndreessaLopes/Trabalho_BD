@@ -19,13 +19,7 @@
         </v-list>
       </v-menu>
       <v-icon @click="print" class="ml-6">mdi-printer</v-icon>
-      <input
-        ref="fileInput"
-        type="file"
-        style="display: none;"
-        accept="application/pdf"
-        @change="handleFileUpload"
-      />
+      <input ref="fileInput" type="file" style="display: none;" accept="application/pdf" @change="handleFileUpload" />
     </v-app-bar>
 
     <v-navigation-drawer v-model="drawer" temporary clipped app>
@@ -144,7 +138,7 @@ export default defineComponent({
           },
           tooltip: {
             callbacks: {
-              label: function(tooltipItem) {
+              label: function (tooltipItem) {
                 return tooltipItem.label + ': ' + tooltipItem.raw + '%';
               }
             }
@@ -174,7 +168,15 @@ export default defineComponent({
       this.fetchData();
     },
     fetchData() {
-      axios.get('/api/v1/relatorio-diversos', { params: this.selected })
+      // Suponha que o token JWT esteja armazenado no localStorage
+      const token = localStorage.getItem('token');
+
+      axios.get('http://localhost:8000/api/v1/relatorio-diversos', {
+        params: this.selected,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
         .then(response => {
           const data = response.data;
           this.infoCards[0].value = data.posicao_inicial;
